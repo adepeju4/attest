@@ -1,79 +1,96 @@
 # attest
 
-**Evidence-grounded evaluation for AI agent trajectories.** Judge an agent by
-verifying its claims against the *actual tool outputs* — not by asking another LLM
-"did this look good?"
+**Evidence-grounded evaluation for AI agent trajectories.** Judge an agent by checking
+its claims against the *actual tool outputs* — not by asking another LLM "did this look
+good?"
 
 ```bash
-uv tool install attest   # (once published)
-attest run trajectory.json
+uv tool install attest          # once published to PyPI
+attest run your-trajectory.json
 ```
 
-## Why this exists
+## Why
 
-2026 research showed the tools we use to measure AI are broken in two ways this
-project attacks directly:
+Evaluating AI agents usually means **LLM-as-judge** — one model grading another. Two
+problems attest tackles directly:
 
-1. **LLM-as-judge can be gamed.** Rewording an agent's chain-of-thought inflates a
-   judge's false-positive rate by up to ~90% — because the judge grades the agent's
-   *story*, not what it did. *([Gaming the Judge, arXiv:2601.14691](https://arxiv.org/pdf/2601.14691))*
-2. **Eval scores have no error bars.** Most tools report a bare pass rate, so teams
-   chase differences that are pure noise.
+1. **It grades the story, not the work.** A holistic "is this good?" judge reads the
+   agent's confident narrative and can wave through specific ungrounded claims buried in
+   an otherwise-solid answer. *(See [Gaming the Judge, arXiv:2601.14691](https://arxiv.org/pdf/2601.14691).)*
+2. **The scores have no error bars.** Most tools report a bare pass rate, so teams chase
+   differences that are pure noise.
 
-**attest's bet:** stop trusting what the model *says* it did; verify each claim
-against the recorded tool outputs, and report results with confidence intervals.
-The same "verify against real state, not narrative" primitive is what powers the
-strongest prompt-injection defenses (AgentDojo, CaMeL) — so this is also the
-foundation for security work later.
+**attest's approach:** never trust what the model *says* it did. Extract the answer's
+claims and verify **each one against the recorded tool outputs**, report with confidence
+intervals, and back every verdict with the exact evidence span. The same "verify against
+real state, not narrative" primitive underpins the strongest prompt-injection defenses
+(AgentDojo, CaMeL) — so it's also the foundation for security checks later.
+
+## What it does
+
+attest evaluates a **trajectory** (an agent run: tool calls, their real outputs, the
+final answer) across dimensions and returns one combined report:
+
+- **Faithfulness** — extracts atomic claims from the answer and verifies each against the
+  tool outputs (`supported` / `unsupported` / `unverifiable`), with a quoted evidence
+  span. The verifier never sees the agent's reasoning, so a reworded narrative can't move
+  the verdict.
+- **Tool-use correctness** — were the right tools called, with no unhandled errors?
+  Deterministic by default (no API key); an optional LLM check judges tool *choice*.
+- **One report** — an `overall_score`, per-dimension scores, and Wilson 95% confidence
+  intervals, all serializable to JSON.
+- **Framework-agnostic** — a LangChain/LangGraph adapter turns any agent run into a
+  trajectory; bring your own.
+- **Read-only & safe** — attest only reads a *recorded* trajectory. It never executes
+  tools, calls the agent, or needs your tools' credentials.
 
 ## How it works
 
 ```
-final_answer ──extract_claims──▶ [atomic claims]
-each claim   ──verify vs────────▶ SUPPORTED · UNSUPPORTED · UNVERIFIABLE
-                  evidence()                 (evidence = REAL tool outputs only)
-score = supported / checkable,  reported with a Wilson 95% CI
+final_answer ──extract claims──▶ [atomic claims]
+each claim   ──verify against──▶ supported · unsupported · unverifiable   (evidence = tool outputs only)
+                  evidence
+
+tool calls   ──allowed? error-handled? appropriate?──▶ tool-use score
+                              │
+                              ▼
+              one TrajectoryReport  (overall + per-dimension + 95% CIs)
 ```
 
-The key design choice (in [`verify.py`](src/attest/verify.py)): the verifier sees
-**only the claim and the evidence — never the agent's reasoning.** That's what makes
-it resistant to chain-of-thought gaming.
+The key design choice: the verifier sees **only the claim and the evidence — never the
+agent's reasoning.** That's what keeps it grounded.
 
-## Status & build order
+## Usage
 
-The core is built and tested:
+**CLI**
 
-- [x] **Step 0 — scaffold:** trajectory schema, stats (Wilson CI + significance),
-  aggregation core, CLI, tests.
-- [ ] **Step 1 — audit existing tools** (DeepEval, Inspect, Ragas, Braintrust): does
-  anyone already do trajectory/evidence grounding? Avoid reinventing. *(half a day)*
-- [x] **Step 2 — `extract_claims()`**: LLM structured output → atomic claims.
-- [x] **Step 3 — `grounded_verifier()`**: the core entailment check, NLI-style
-  (entailment→supported, contradiction→unsupported, neutral→unverifiable), on Haiku
-  via forced tool-use.
-- [x] **Step 4 — the demo:** `attest demo` runs a naive LLM-judge and attest side by
-  side. On `examples/trajectory.json` (which claims "Paris is larger than Berlin"
-  while the tool outputs show Berlin is bigger), the naive judge tends to *pass* the
-  confident answer while attest flags the claim `UNSUPPORTED`.
-- [ ] **Step 5 — ship:** README GIF, publish to PyPI, write the blog post
-  ("The tools we use to measure AI are broken — here's the evidence").
+```bash
+attest stats 41 50              # a pass rate with its Wilson 95% CI (no API key)
+attest tools trajectory.json    # tool-use correctness — deterministic, no API key
+attest run   trajectory.json    # full report: faithfulness + tool-use + overall
+attest demo  trajectory.json    # naive LLM-judge vs attest, side by side
+```
+
+**Library**
+
+```python
+from attest import evaluate
+
+report = evaluate(traj)         # traj: a Trajectory (e.g. from the LangGraph adapter)
+print(report.overall_score)
+print(report.model_dump_json(indent=2))
+```
+
+`run`, `demo`, and `tools --appropriate` call Claude — set `ANTHROPIC_API_KEY` (a local
+`.env` is picked up automatically). Verification runs on Haiku: cents, not dollars.
 
 ## Develop
 
 ```bash
-uv run pytest                                  # 15 tests, no API key needed
-
-# CLI — in this workspace the path has a space, which makes uv drop the installed
-# entry point between runs; the --reinstall-package flag makes each run reliable:
-uv run --reinstall-package attest attest stats 41 50
-uv run --reinstall-package attest attest run examples/trajectory.json
-uv run --reinstall-package attest attest demo examples/trajectory.json
+uv run pytest                   # 32 tests, no API key needed (the LLM is mocked/injected)
 ```
 
-(Once installed from PyPI — `uv tool install attest` — it's just `attest demo …`.)
-
-`run` and `demo` need a real `ANTHROPIC_API_KEY` in the shared workspace-root `.env`
-(`load_dotenv()` finds it automatically). Verification runs on Haiku — cents, not dollars.
+Running the CLI from source before install: prefix with `uv run` (e.g. `uv run attest stats 41 50`).
 
 ## Layout
 
@@ -91,6 +108,12 @@ src/attest/
 │   └── stats.py           # Wilson CI + two-proportion significance
 └── adapters/
     └── langgraph.py       # LangChain/LangGraph run -> Trajectory
-tests/                   # all offline (LLM mocked/injected)
+tests/                   # all offline (the LLM is mocked/injected)
 examples/                # sample trajectories + codesprint_to_attest.py (live integration)
 ```
+
+## Status
+
+Early but working. **Faithfulness** and **tool-use correctness** are built, tested, and
+validated live against a real LangGraph agent. Next up: self-contradiction and a
+prompt-injection flag. Not yet on PyPI.
