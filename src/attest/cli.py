@@ -1,25 +1,16 @@
-"""
-CLI for attest.
-
-  attest stats 41 50                          # pass rate + Wilson 95% CI (no API)
-  attest tools examples/trajectory.json       # tool-use correctness (deterministic, NO API)
-  attest injection examples/trajectory.json   # prompt-injection scan (deterministic, NO API)
-  attest run examples/trajectory.json         # full report: faithfulness + tool-use
-  attest demo examples/trajectory.json        # naive LLM-judge vs attest, side by side
-
-`stats`, `tools`, and `injection` (without --appropriate / --deep) need no API key.
-`run` and `demo` call Claude, reading ANTHROPIC_API_KEY from a local .env.
-"""
+"""CLI for attest: stats, tools, injection, run, demo, models."""
 
 from __future__ import annotations
 
-import os
+import contextlib
 from pathlib import Path
 
 import typer
 from dotenv import load_dotenv
 
+from ._llm import using
 from .checks.judge_baseline import naive_judge
+from .providers import DEFAULT_PROVIDER, build_client, list_models, providers, resolve_key
 from .scoring.report import evaluate
 from .scoring.stats import wilson_interval
 from .checks.tool_use import ToolUseVerdict, check_tool_use
@@ -27,15 +18,23 @@ from .checks.injection import check_injection
 from .trajectory import Trajectory
 from .checks.verify import Verdict, extract_claims, grounded_verifier, judge_trajectory
 
-load_dotenv()  # finds the shared workspace-root .env by walking up the tree
+load_dotenv()
 app = typer.Typer(help="Evidence-grounded evaluation for AI agent trajectories.")
 
+_PROVIDER_OPT = typer.Option(DEFAULT_PROVIDER, "--provider", "-p",
+                             help="LLM provider: anthropic (default), openai, or gemini.")
+_MODEL_OPT = typer.Option(None, "--model", "-m",
+                          help="Model id; defaults to a sensible model for the provider.")
 
-def _require_key() -> None:
-    key = os.getenv("ANTHROPIC_API_KEY", "")
-    if not key or key.startswith("sk-ant-your"):
-        typer.echo("Set a real ANTHROPIC_API_KEY in the workspace .env to run this.")
+
+def _require_key(provider: str) -> None:
+    if not resolve_key(provider):
+        typer.echo(f"Set a {provider} API key (its env var) in the workspace .env to run this.")
         raise typer.Exit(code=1)
+
+
+def _llm_ctx(provider: str, model: str | None):
+    return using(build_client(provider, model))
 
 
 def _load(path: Path) -> list[Trajectory]:
@@ -76,20 +75,24 @@ def tools(
     path: Path,
     appropriate: bool = typer.Option(False, "--appropriate",
                                       help="Also run the LLM tool-choice check (needs a key)."),
+    provider: str = _PROVIDER_OPT,
+    model: str = _MODEL_OPT,
 ) -> None:
     """Tool-use correctness only — deterministic, NO API key (unless --appropriate)."""
     if appropriate:
-        _require_key()
-    for traj in _load(path):
-        score = check_tool_use(traj, appropriate=appropriate)
-        typer.echo(f"- {traj.task[:70]!r}")
-        typer.echo(f"  tool-use {score.correct_rate:.0%}  "
-                   f"({score.correct}/{score.total} calls correct)")
-        typer.echo(f"  {score.summary}")
-        for r in score.reviews:
-            if r.verdict is not ToolUseVerdict.CORRECT:
-                typer.echo(f"    {r.verdict.value.upper()}: step {r.step} ({r.tool}) — {r.reason}")
-        typer.echo("")
+        _require_key(provider)
+    ctx = _llm_ctx(provider, model) if appropriate else contextlib.nullcontext()
+    with ctx:
+        for traj in _load(path):
+            score = check_tool_use(traj, appropriate=appropriate)
+            typer.echo(f"- {traj.task[:70]!r}")
+            typer.echo(f"  tool-use {score.correct_rate:.0%}  "
+                       f"({score.correct}/{score.total} calls correct)")
+            typer.echo(f"  {score.summary}")
+            for r in score.reviews:
+                if r.verdict is not ToolUseVerdict.CORRECT:
+                    typer.echo(f"    {r.verdict.value.upper()}: step {r.step} ({r.tool}) — {r.reason}")
+            typer.echo("")
 
 
 @app.command()
@@ -97,20 +100,24 @@ def injection(
     path: Path,
     deep: bool = typer.Option(False, "--deep",
                               help="Also LLM-check whether the agent FOLLOWED each payload (needs a key)."),
+    provider: str = _PROVIDER_OPT,
+    model: str = _MODEL_OPT,
 ) -> None:
     """Flag prompt-injection payloads in tool outputs — deterministic, NO API key (unless --deep)."""
     if deep:
-        _require_key()
-    for traj in _load(path):
-        report = check_injection(traj, deep=deep)
-        typer.echo(f"- {traj.task[:70]!r}")
-        typer.echo(f"  {'CLEAN' if report.clean else 'FLAGGED'}: {report.summary}")
-        for f in report.findings:
-            where = f" ({f.tool})" if f.tool else ""
-            typer.echo(f"    {f.verdict.value.upper()}: step {f.step}{where} — {f.detail[:90]!r}")
-            if f.reason:
-                typer.echo(f"      reason: {f.reason}")
-        typer.echo("")
+        _require_key(provider)
+    ctx = _llm_ctx(provider, model) if deep else contextlib.nullcontext()
+    with ctx:
+        for traj in _load(path):
+            report = check_injection(traj, deep=deep)
+            typer.echo(f"- {traj.task[:70]!r}")
+            typer.echo(f"  {'CLEAN' if report.clean else 'FLAGGED'}: {report.summary}")
+            for f in report.findings:
+                where = f" ({f.tool})" if f.tool else ""
+                typer.echo(f"    {f.verdict.value.upper()}: step {f.step}{where} — {f.detail[:90]!r}")
+                if f.reason:
+                    typer.echo(f"      reason: {f.reason}")
+            typer.echo("")
 
 
 @app.command()
@@ -118,54 +125,75 @@ def run(
     path: Path,
     appropriate: bool = typer.Option(False, "--appropriate",
                                      help="Also run the LLM tool-choice check (1 call per tool call)."),
+    kind: str = typer.Option("factual", "--kind",
+                             help="Answer type: 'factual' (default) or 'plan' (judge fidelity to the plan)."),
+    provider: str = _PROVIDER_OPT,
+    model: str = _MODEL_OPT,
 ) -> None:
     """Full report on a trajectory (or JSONL): faithfulness + tool-use + overall score."""
-    _require_key()
+    _require_key(provider)
     trajectories = _load(path)
     typer.echo(f"Loaded {len(trajectories)} trajectory(ies) from {path}\n")
 
     overalls: list[float] = []
-    for traj in trajectories:
-        report = evaluate(traj, appropriate=appropriate)
-        _render_report(traj, report)
-        overalls.append(report.overall_score)
+    with _llm_ctx(provider, model):
+        for traj in trajectories:
+            report = evaluate(traj, appropriate=appropriate, answer_kind=kind)
+            _render_report(traj, report)
+            overalls.append(report.overall_score)
 
     if overalls:
         typer.echo(f"Mean overall score: {sum(overalls) / len(overalls):.0%}")
 
 
 @app.command()
-def demo(path: Path = typer.Argument(Path("examples/trajectory.json"))) -> None:
+def demo(
+    path: Path = typer.Argument(Path("examples/trajectory.json")),
+    provider: str = _PROVIDER_OPT,
+    model: str = _MODEL_OPT,
+) -> None:
     """Run the naive LLM-judge and attest side by side — the headline comparison."""
-    _require_key()
-    for traj in _load(path):
-        typer.echo("-" * 72)
-        typer.echo(f"TASK: {traj.task}\n")
-        typer.echo("Agent's answer (the initial LLM's claim):")
-        typer.echo(f"  {traj.final_answer}\n")
+    _require_key(provider)
+    with _llm_ctx(provider, model):
+        for traj in _load(path):
+            typer.echo("-" * 72)
+            typer.echo(f"TASK: {traj.task}\n")
+            typer.echo("Agent's answer (the initial LLM's claim):")
+            typer.echo(f"  {traj.final_answer}\n")
 
-        verdict = naive_judge(traj)
-        typer.echo("Naive LLM-judge (reads the agent's reasoning):")
-        typer.echo(f"  {'PASS' if verdict.passed else 'FAIL'} - {verdict.reason}\n")
+            verdict = naive_judge(traj)
+            typer.echo("Naive LLM-judge (reads the agent's reasoning):")
+            typer.echo(f"  {'PASS' if verdict.passed else 'FAIL'} - {verdict.reason}\n")
 
-        score = judge_trajectory(traj, extract_claims, grounded_verifier)
-        typer.echo("attest (checks claims against real tool outputs only):")
-        typer.echo(f"  grounding {score.grounding_rate:.0%} "
-                   f"({score.supported}/{score.checkable} checkable claims)")
-        flagged = [r for r in score.results if r.verdict is Verdict.UNSUPPORTED]
-        for r in flagged:
-            _show_flagged(r)
+            score = judge_trajectory(traj, extract_claims, grounded_verifier)
+            typer.echo("attest (checks claims against real tool outputs only):")
+            typer.echo(f"  grounding {score.grounding_rate:.0%} "
+                       f"({score.supported}/{score.checkable} checkable claims)")
+            flagged = [r for r in score.results if r.verdict is Verdict.UNSUPPORTED]
+            for r in flagged:
+                _show_flagged(r)
 
-        typer.echo("")
-        if verdict.passed and flagged:
-            typer.echo("=> attest caught a false claim the LLM-judge waved through.")
-        elif not verdict.passed and flagged:
-            typer.echo("=> both caught the problem.")
-        elif verdict.passed and not flagged:
-            typer.echo("=> both agree this answer is sound.")
-        else:
-            typer.echo("=> the LLM-judge flagged something attest's grounding didn't.")
+            typer.echo("")
+            if verdict.passed and flagged:
+                typer.echo("=> attest caught a false claim the LLM-judge waved through.")
+            elif not verdict.passed and flagged:
+                typer.echo("=> both caught the problem.")
+            elif verdict.passed and not flagged:
+                typer.echo("=> both agree this answer is sound.")
+            else:
+                typer.echo("=> the LLM-judge flagged something attest's grounding didn't.")
     typer.echo("-" * 72)
+
+
+@app.command()
+def models(
+    provider: str = typer.Argument(..., help=f"One of: {', '.join(providers())}."),
+) -> None:
+    """List a provider's models — live if its key is set, otherwise the curated shortlist."""
+    source = "live" if resolve_key(provider) else "curated"
+    typer.echo(f"{provider} models ({source}):")
+    for name in list_models(provider):
+        typer.echo(f"  {name}")
 
 
 if __name__ == "__main__":
