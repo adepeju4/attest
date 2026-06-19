@@ -1,6 +1,6 @@
 [project]
 name = "agent-attest"
-version = "0.2.0"
+version = "0.2.1"
 description = "Evidence-grounded evaluator for AI agent trajectories — judge by verifying claims against real tool outputs, not LLM-judge vibes."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -29,8 +29,8 @@ dependencies = [
 
 [project.optional-dependencies]
 openai = ["openai>=1.40"]
-gemini = ["google-genai>=1.0"]
-all = ["openai>=1.40", "google-genai>=1.0"]
+gemini = ["instructor[google-genai]>=1.15.3"]
+all = ["openai>=1.40", "instructor[google-genai]>=1.15.3"]
 
 [project.urls]
 Homepage = "https://github.com/adepeju4/attest"

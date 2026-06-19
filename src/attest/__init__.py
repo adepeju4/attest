@@ -32,4 +32,4 @@ __all__ = [
     "wilson_interval", "difference_is_real", "Proportion",
 ]
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
