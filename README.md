@@ -5,7 +5,7 @@ its claims against the *actual tool outputs* — not by asking another LLM "did 
 good?"
 
 ```bash
-uv tool install attest          # once published to PyPI
+uv tool install agent-attest    # distribution name; the CLI + import are `attest`
 attest run your-trajectory.json
 ```
 
@@ -75,25 +75,59 @@ attest tools trajectory.json      # tool-use correctness — deterministic, no A
 attest injection trajectory.json  # prompt-injection scan — deterministic, no API key
 attest run   trajectory.json      # full report: faithfulness + tool-use + overall
 attest demo  trajectory.json      # naive LLM-judge vs attest, side by side
+attest models openai              # list a provider's models (live if its key is set)
+
+attest run trajectory.json --provider openai --model gpt-4o-mini   # any provider
 ```
 
 **Library**
 
 ```python
-from attest import evaluate
+from attest import Attest
 
-report = evaluate(traj)         # traj: a Trajectory (e.g. from the LangGraph adapter)
+judge = Attest(key="sk-ant-...")   # or Attest() to read ANTHROPIC_API_KEY from the env
+report = judge.evaluate(traj)      # traj: a Trajectory (e.g. from the LangGraph adapter)
 print(report.overall_score)
 print(report.model_dump_json(indent=2))
+
+judge.tool_use(traj)               # tool-use correctness
+judge.injection(traj, deep=True)   # prompt-injection scan
+judge.stats(41, 50)                # pass rate + Wilson 95% CI (no API call)
 ```
 
-`run`, `demo`, and `tools --appropriate` call Claude — set `ANTHROPIC_API_KEY` (a local
-`.env` is picked up automatically). Verification runs on Haiku: cents, not dollars.
+Configure the provider, key, and model once, then evaluate many trajectories. Prefer
+dependency injection? The functional API is still there — `from attest import evaluate,
+check_tool_use`.
+
+### Providers
+
+attest runs on **Anthropic, OpenAI, or Gemini** behind one interface (via
+[instructor](https://github.com/567-labs/instructor) for reliable structured output):
+
+```python
+Attest(provider="openai", model="gpt-4o-mini")    # key from OPENAI_API_KEY
+Attest(provider="gemini")                          # key from GEMINI_API_KEY / GOOGLE_API_KEY
+Attest.providers()                                 # ['anthropic', 'openai', 'gemini']
+Attest.models("openai")                            # live list if OPENAI_API_KEY is set, else curated
+```
+
+The base install ships Anthropic. OpenAI and Gemini are optional extras:
+
+```bash
+pip install agent-attest             # base (Anthropic), exposes `import attest`
+pip install "agent-attest[openai]"   # adds the OpenAI SDK
+pip install "agent-attest[gemini]"   # adds the Google GenAI SDK
+pip install "agent-attest[all]"      # both
+```
+
+Each provider reads its own key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or
+`GEMINI_API_KEY`) — a local `.env` is picked up automatically. Verification defaults to a
+small/fast model per provider: cents, not dollars.
 
 ## Develop
 
 ```bash
-uv run pytest                   # 37 tests, no API key needed (the LLM is mocked/injected)
+uv run pytest                   # 58 tests, no API key needed (the LLM is mocked/injected)
 ```
 
 Running the CLI from source before install: prefix with `uv run` (e.g. `uv run attest stats 41 50`).

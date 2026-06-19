@@ -1,15 +1,41 @@
 [project]
-name = "attest"
-version = "0.1.0"
+name = "agent-attest"
+version = "0.2.0"
 description = "Evidence-grounded evaluator for AI agent trajectories — judge by verifying claims against real tool outputs, not LLM-judge vibes."
 readme = "README.md"
 requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Adepeju Orefejo", email = "adepejuorefejo5@gmail.com" }]
+keywords = ["evals", "evaluation", "llm", "agents", "ai", "prompt-injection", "faithfulness", "trajectory"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Testing",
+]
 dependencies = [
     "anthropic>=0.40",
     "pydantic>=2.7",
     "typer>=0.12",
     "python-dotenv>=1.0",
+    "instructor>=1.15.3",
 ]
+
+[project.optional-dependencies]
+openai = ["openai>=1.40"]
+gemini = ["google-genai>=1.0"]
+all = ["openai>=1.40", "google-genai>=1.0"]
+
+[project.urls]
+Homepage = "https://github.com/adepeju4/attest"
+Repository = "https://github.com/adepeju4/attest"
+Issues = "https://github.com/adepeju4/attest/issues"
 
 [project.scripts]
 attest = "attest.cli:app"
@@ -23,6 +49,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/attest"]
+
+[tool.hatch.build.targets.sdist]
+exclude = ["/tests", "/.github"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
