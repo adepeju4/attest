@@ -1,4 +1,4 @@
-"""CLI for attest: stats, tools, injection, run, demo, models."""
+"""CLI for attest: stats, tools, injection, role, run, demo, models."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from .scoring.report import evaluate
 from .scoring.stats import wilson_interval
 from .checks.tool_use import ToolUseVerdict, check_tool_use
 from .checks.injection import check_injection
+from .checks.role import check_role_adherence
 from .trajectory import Trajectory
 from .checks.verify import Verdict, extract_claims, grounded_verifier, judge_trajectory
 
@@ -117,6 +118,24 @@ def injection(
                 typer.echo(f"    {f.verdict.value.upper()}: step {f.step}{where} — {f.detail[:90]!r}")
                 if f.reason:
                     typer.echo(f"      reason: {f.reason}")
+            typer.echo("")
+
+
+@app.command()
+def role(
+    path: Path,
+    provider: str = _PROVIDER_OPT,
+    model: str = _MODEL_OPT,
+) -> None:
+    """Judge whether the agent stayed within its system-prompt-defined role (needs a key)."""
+    _require_key(provider)
+    with _llm_ctx(provider, model):
+        for traj in _load(path):
+            rep = check_role_adherence(traj)
+            typer.echo(f"- {traj.task[:70]!r}")
+            typer.echo(f"  {rep.verdict.value.upper()}: {rep.reason}")
+            if rep.evidence_quote:
+                typer.echo(f"    evidence: {rep.evidence_quote!r}")
             typer.echo("")
 
 

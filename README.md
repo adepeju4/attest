@@ -41,6 +41,10 @@ final answer) across dimensions and returns one combined report:
   (deterministic) and, with `--deep`, an *effect-based* check for whether the agent took
   an action the principal never authorized — catching **novel** injections, not just known
   phrasings like "ignore previous instructions".
+- **Role adherence** — did the agent stay within the role and scope its system prompt
+  defines? Catches **jailbreaks** the user types directly (out-of-scope requests, "ignore
+  your instructions", attempts to change role or leak the policy) — the *principal-side*
+  threat that injection detection deliberately ignores.
 - **One report** — an `overall_score`, per-dimension scores, and Wilson 95% confidence
   intervals, all serializable to JSON.
 - **Framework-agnostic** — a LangChain/LangGraph adapter turns any agent run into a
@@ -73,6 +77,7 @@ agent's reasoning.** That's what keeps it grounded.
 attest stats 41 50                # a pass rate with its Wilson 95% CI (no API key)
 attest tools trajectory.json      # tool-use correctness — deterministic, no API key
 attest injection trajectory.json  # prompt-injection scan — deterministic, no API key
+attest role  trajectory.json      # role-adherence / jailbreak check (needs an API key)
 attest run   trajectory.json      # full report: faithfulness + tool-use + overall
 attest demo  trajectory.json      # naive LLM-judge vs attest, side by side
 attest models openai              # list a provider's models (live if its key is set)
@@ -92,6 +97,7 @@ print(report.model_dump_json(indent=2))
 
 judge.tool_use(traj)               # tool-use correctness
 judge.injection(traj, deep=True)   # prompt-injection scan
+judge.role_adherence(traj)         # role-adherence / jailbreak check
 judge.stats(41, 50)                # pass rate + Wilson 95% CI (no API call)
 ```
 
@@ -127,7 +133,7 @@ small/fast model per provider: cents, not dollars.
 ## Develop
 
 ```bash
-uv run pytest                   # 58 tests, no API key needed (the LLM is mocked/injected)
+uv run pytest                   # 63 tests, no API key needed (the LLM is mocked/injected)
 ```
 
 Running the CLI from source before install: prefix with `uv run` (e.g. `uv run attest stats 41 50`).
@@ -138,11 +144,12 @@ Running the CLI from source before install: prefix with `uv run` (e.g. `uv run a
 src/attest/
 ├── trajectory.py        # core data model — the thought-vs-tool-output distinction
 ├── _llm.py              # Anthropic wrapper: call(output=PydanticModel) -> validated
-├── cli.py               # attest stats / tools / run / demo
+├── cli.py               # attest stats / tools / injection / role / run / demo / models
 ├── checks/              # the evaluation dimensions
 │   ├── verify.py          # faithfulness: extract_claims + grounded_verifier
 │   ├── tool_use.py        # tool-use correctness (deterministic + optional LLM)
 │   ├── injection.py       # prompt-injection: payload scan + authorization check
+│   ├── role.py            # role adherence / jailbreak resistance
 │   └── judge_baseline.py  # the naive LLM-as-judge attest is built to beat
 ├── scoring/
 │   ├── report.py          # evaluate() -> combined TrajectoryReport + overall_score
@@ -150,7 +157,7 @@ src/attest/
 └── adapters/
     └── langgraph.py       # LangChain/LangGraph run -> Trajectory
 tests/                   # all offline (the LLM is mocked/injected)
-examples/                # sample trajectories (clean, gamed, injection)
+examples/                # sample trajectories (clean, gamed, injection, jailbreak)
 ```
 
 ## Status

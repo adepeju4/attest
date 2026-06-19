@@ -8,6 +8,7 @@ import instructor
 
 from ._llm import using
 from .checks.injection import InjectionReport, check_injection
+from .checks.role import RoleReport, check_role_adherence
 from .checks.judge_baseline import JudgeVerdict, naive_judge
 from .checks.tool_use import ToolUseScore, check_tool_use
 from .checks.verify import extract_claims
@@ -57,6 +58,10 @@ class Attest:
     def injection(self, traj: Trajectory, *, deep: bool = False) -> InjectionReport:
         with using(self._client):
             return check_injection(traj, deep=deep)
+
+    def role_adherence(self, traj: Trajectory) -> RoleReport:
+        with using(self._client):
+            return check_role_adherence(traj)
 
     def judge(self, traj: Trajectory) -> JudgeVerdict:
         with using(self._client):
