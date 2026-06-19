@@ -48,15 +48,17 @@ def main() -> None:
     judge = Attest()
     report = judge.evaluate(trajectory)
 
-    print(f"overall score  : {report.overall_score:.0%}")
-    print(f"grounding rate : {report.faithfulness.grounding_rate:.0%}")
-    print(f"tool-use rate  : {report.tool_use.correct_rate:.0%}")
+    print(f"overall score : {report.overall_score:.0%}")
+    print(f"passed        : {report.passed}")
     print()
 
-    for r in report.faithfulness.results:
-        print(f"[{r.verdict.value.upper():>12}]  {r.claim}")
-        if r.reason:
-            print(f"               {r.reason}")
+    for r in report.results:
+        score = f"{r.score:.0%}" if r.score is not None else "—"
+        print(f"{r.check} ({score}): {r.summary}")
+        for f in r.findings:
+            print(f"  [{f.severity.value.upper():>4}] {f.verdict}: {f.subject}")
+            if f.reason:
+                print(f"         {f.reason}")
 
 
 if __name__ == "__main__":

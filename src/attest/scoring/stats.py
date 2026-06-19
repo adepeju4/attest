@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+
+from pydantic import BaseModel
 
 Z_95 = 1.96
 
 
-@dataclass(frozen=True)
-class Proportion:
+class Proportion(BaseModel):
     rate: float
     low: float
     high: float
@@ -22,7 +22,7 @@ class Proportion:
 def wilson_interval(successes: int, n: int, z: float = Z_95) -> Proportion:
     """Wilson score interval for a binomial proportion."""
     if n == 0:
-        return Proportion(0.0, 0.0, 0.0, 0)
+        return Proportion(rate=0.0, low=0.0, high=0.0, n=0)
     p = successes / n
     denom = 1 + z * z / n
     center = (p + z * z / (2 * n)) / denom

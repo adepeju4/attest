@@ -1,17 +1,18 @@
 """The combined report — offline, with injected fake faithfulness functions."""
 
-from attest.scoring.report import evaluate, TrajectoryReport
+from attest.scoring.report import evaluate
+from attest.results import Report, Finding, Severity
 from attest.trajectory import Step, ToolCall, Trajectory
-from attest.checks.verify import ClaimResult, Verdict
 
 
 def _fake_extract(_answer):
     return ["claim A", "claim B"]
 
 
-def _fake_verify(claim, _evidence):
-    verdict = Verdict.SUPPORTED if "A" in claim else Verdict.UNSUPPORTED
-    return ClaimResult(claim=claim, verdict=verdict)
+def _fake_verify(claim, _evidence) -> Finding:
+    if "A" in claim:
+        return Finding(severity=Severity.PASS, verdict="supported", subject=claim)
+    return Finding(severity=Severity.FAIL, verdict="unsupported", subject=claim)
 
 
 def _traj():
@@ -28,16 +29,17 @@ def _traj():
 
 def test_evaluate_combines_both_dimensions():
     report = evaluate(_traj(), extract=_fake_extract, verify=_fake_verify)
-    assert isinstance(report, TrajectoryReport)
-    assert report.faithfulness.grounding_rate == 0.5
-    assert report.tool_use.correct_rate == 1.0
+    assert isinstance(report, Report)
+    assert report.by("faithfulness").score == 0.5
+    assert report.by("tool_use").score == 1.0
     assert report.overall_score == 0.75
+    assert report.passed is False
 
 
 def test_report_serializes_to_json():
     report = evaluate(_traj(), extract=_fake_extract, verify=_fake_verify)
     js = report.model_dump_json()
     assert '"overall_score"' in js
-    assert '"grounding_rate"' in js
-    assert '"correct_rate"' in js
-    assert '"summary"' in js
+    assert '"check"' in js
+    assert '"findings"' in js
+    assert '"prompt_version"' in js

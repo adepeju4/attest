@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
-from typing import Callable
+from typing import Callable, Sequence
 
 import instructor
 
 from ._llm import using
-from .checks.injection import InjectionReport, check_injection
-from .checks.role import RoleReport, check_role_adherence
+from .checks.injection import check_injection
+from .checks.role import check_role_adherence
 from .checks.judge_baseline import JudgeVerdict, naive_judge
-from .checks.tool_use import ToolUseScore, check_tool_use
+from .checks.tool_use import check_tool_use
 from .checks.verify import extract_claims
 from .providers import DEFAULT_PROVIDER, build_client, default_model, list_models, providers
-from .scoring.report import TrajectoryReport, evaluate
+from .results import CheckResult, Report
+from .scoring.report import DEFAULT_CHECKS, evaluate
 from .scoring.stats import Proportion, wilson_interval
 from .trajectory import Trajectory
 
@@ -37,29 +38,33 @@ class Attest:
         self,
         traj: Trajectory,
         *,
+        checks: Sequence[str] = DEFAULT_CHECKS,
         appropriate: bool = False,
         answer_kind: str = "factual",
+        deep: bool = True,
         extract: Callable[[str], list[str]] = extract_claims,
         verify=None,
-    ) -> TrajectoryReport:
+    ) -> Report:
         with using(self._client):
             return evaluate(
                 traj,
+                checks=checks,
                 appropriate=appropriate,
                 answer_kind=answer_kind,
+                deep=deep,
                 extract=extract,
                 verify=verify,
             )
 
-    def tool_use(self, traj: Trajectory, *, appropriate: bool = False) -> ToolUseScore:
+    def tool_use(self, traj: Trajectory, *, appropriate: bool = False) -> CheckResult:
         with using(self._client):
             return check_tool_use(traj, appropriate=appropriate)
 
-    def injection(self, traj: Trajectory, *, deep: bool = False) -> InjectionReport:
+    def injection(self, traj: Trajectory, *, deep: bool = False) -> CheckResult:
         with using(self._client):
             return check_injection(traj, deep=deep)
 
-    def role_adherence(self, traj: Trajectory) -> RoleReport:
+    def role_adherence(self, traj: Trajectory) -> CheckResult:
         with using(self._client):
             return check_role_adherence(traj)
 

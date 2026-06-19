@@ -10,14 +10,15 @@ from dotenv import load_dotenv
 
 from ._llm import using
 from .checks.judge_baseline import naive_judge
-from .providers import DEFAULT_PROVIDER, build_client, list_models, providers, resolve_key
-from .scoring.report import evaluate
-from .scoring.stats import wilson_interval
-from .checks.tool_use import ToolUseVerdict, check_tool_use
 from .checks.injection import check_injection
 from .checks.role import check_role_adherence
+from .checks.tool_use import check_tool_use
+from .checks.verify import extract_claims, grounded_verifier, judge_trajectory
+from .providers import DEFAULT_PROVIDER, build_client, list_models, providers, resolve_key
+from .results import CheckResult, Report, Severity
+from .scoring.report import DEFAULT_CHECKS, evaluate
+from .scoring.stats import wilson_interval
 from .trajectory import Trajectory
-from .checks.verify import Verdict, extract_claims, grounded_verifier, judge_trajectory
 
 load_dotenv()
 app = typer.Typer(help="Evidence-grounded evaluation for AI agent trajectories.")
@@ -44,24 +45,25 @@ def _load(path: Path) -> list[Trajectory]:
     return [Trajectory.model_validate_json(ln) for ln in lines if ln.strip()]
 
 
-def _show_flagged(r) -> None:
-    typer.echo(f"  UNSUPPORTED: {r.claim}")
-    if r.reason:
-        typer.echo(f"    reason:   {r.reason}")
-    if r.evidence_quote:
-        typer.echo(f"    evidence: {r.evidence_quote!r}")
+def _render_check(r: CheckResult, indent: str = "") -> None:
+    score = f"{r.score:.0%}" if r.score is not None else "—"
+    flag = "PASS" if r.passed else "FAIL"
+    typer.echo(f"{indent}{r.check:13} {score:>4}  {flag}  {r.summary}")
+    for f in r.findings:
+        if f.severity is Severity.PASS:
+            continue
+        where = f" (step {f.step})" if f.step is not None else ""
+        typer.echo(f"{indent}    {f.severity.value.upper()} {f.verdict}{where}: {f.subject}")
+        if f.reason:
+            typer.echo(f"{indent}      {f.reason}")
 
 
-def _render_report(traj: Trajectory, report) -> None:
-    f, t = report.faithfulness, report.tool_use
+def _render_report(traj: Trajectory, report: Report) -> None:
+    flag = "PASS" if report.passed else "FAIL"
     typer.echo(f"- {traj.task[:70]!r}")
-    typer.echo(f"  overall {report.overall_score:.0%}  "
-               f"(faithfulness {f.grounding_rate:.0%}, tool-use {t.correct_rate:.0%})")
-    typer.echo(f"  agent answer: {f.final_answer[:200]}")
-    for r in f.results:
-        if r.verdict is Verdict.UNSUPPORTED:
-            _show_flagged(r)
-    typer.echo(f"  tool use: {t.summary}")
+    typer.echo(f"  {flag}  overall {report.overall_score:.0%}")
+    for r in report.results:
+        _render_check(r, indent="  ")
     typer.echo("")
 
 
@@ -85,14 +87,8 @@ def tools(
     ctx = _llm_ctx(provider, model) if appropriate else contextlib.nullcontext()
     with ctx:
         for traj in _load(path):
-            score = check_tool_use(traj, appropriate=appropriate)
             typer.echo(f"- {traj.task[:70]!r}")
-            typer.echo(f"  tool-use {score.correct_rate:.0%}  "
-                       f"({score.correct}/{score.total} calls correct)")
-            typer.echo(f"  {score.summary}")
-            for r in score.reviews:
-                if r.verdict is not ToolUseVerdict.CORRECT:
-                    typer.echo(f"    {r.verdict.value.upper()}: step {r.step} ({r.tool}) — {r.reason}")
+            _render_check(check_tool_use(traj, appropriate=appropriate), indent="  ")
             typer.echo("")
 
 
@@ -110,14 +106,8 @@ def injection(
     ctx = _llm_ctx(provider, model) if deep else contextlib.nullcontext()
     with ctx:
         for traj in _load(path):
-            report = check_injection(traj, deep=deep)
             typer.echo(f"- {traj.task[:70]!r}")
-            typer.echo(f"  {'CLEAN' if report.clean else 'FLAGGED'}: {report.summary}")
-            for f in report.findings:
-                where = f" ({f.tool})" if f.tool else ""
-                typer.echo(f"    {f.verdict.value.upper()}: step {f.step}{where} — {f.detail[:90]!r}")
-                if f.reason:
-                    typer.echo(f"      reason: {f.reason}")
+            _render_check(check_injection(traj, deep=deep), indent="  ")
             typer.echo("")
 
 
@@ -131,17 +121,16 @@ def role(
     _require_key(provider)
     with _llm_ctx(provider, model):
         for traj in _load(path):
-            rep = check_role_adherence(traj)
             typer.echo(f"- {traj.task[:70]!r}")
-            typer.echo(f"  {rep.verdict.value.upper()}: {rep.reason}")
-            if rep.evidence_quote:
-                typer.echo(f"    evidence: {rep.evidence_quote!r}")
+            _render_check(check_role_adherence(traj), indent="  ")
             typer.echo("")
 
 
 @app.command()
 def run(
     path: Path,
+    checks: str = typer.Option(",".join(DEFAULT_CHECKS), "--checks",
+                               help="Comma-separated: faithfulness,tool_use,injection,role."),
     appropriate: bool = typer.Option(False, "--appropriate",
                                      help="Also run the LLM tool-choice check (1 call per tool call)."),
     kind: str = typer.Option("factual", "--kind",
@@ -149,15 +138,16 @@ def run(
     provider: str = _PROVIDER_OPT,
     model: str = _MODEL_OPT,
 ) -> None:
-    """Full report on a trajectory (or JSONL): faithfulness + tool-use + overall score."""
+    """Full report on a trajectory (or JSONL): runs the chosen checks + an overall score."""
     _require_key(provider)
+    selected = [c.strip() for c in checks.split(",") if c.strip()]
     trajectories = _load(path)
     typer.echo(f"Loaded {len(trajectories)} trajectory(ies) from {path}\n")
 
     overalls: list[float] = []
     with _llm_ctx(provider, model):
         for traj in trajectories:
-            report = evaluate(traj, appropriate=appropriate, answer_kind=kind)
+            report = evaluate(traj, checks=selected, appropriate=appropriate, answer_kind=kind)
             _render_report(traj, report)
             overalls.append(report.overall_score)
 
@@ -184,13 +174,14 @@ def demo(
             typer.echo("Naive LLM-judge (reads the agent's reasoning):")
             typer.echo(f"  {'PASS' if verdict.passed else 'FAIL'} - {verdict.reason}\n")
 
-            score = judge_trajectory(traj, extract_claims, grounded_verifier)
+            result = judge_trajectory(traj, extract_claims, grounded_verifier)
             typer.echo("attest (checks claims against real tool outputs only):")
-            typer.echo(f"  grounding {score.grounding_rate:.0%} "
-                       f"({score.supported}/{score.checkable} checkable claims)")
-            flagged = [r for r in score.results if r.verdict is Verdict.UNSUPPORTED]
-            for r in flagged:
-                _show_flagged(r)
+            typer.echo(f"  grounding {result.score:.0%}  ({result.summary})")
+            flagged = result.failures
+            for f in flagged:
+                typer.echo(f"    UNSUPPORTED: {f.subject}")
+                if f.reason:
+                    typer.echo(f"      {f.reason}")
 
             typer.echo("")
             if verdict.passed and flagged:

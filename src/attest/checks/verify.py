@@ -2,19 +2,19 @@
 
 from __future__ import annotations
 
-from enum import Enum
 from typing import Callable, Literal
 
-from pydantic import BaseModel, computed_field
+from pydantic import BaseModel
 
 from .._llm import call
+from ..results import CheckResult, Finding, Severity
 from ..trajectory import Trajectory
 
-
-class Verdict(str, Enum):
-    SUPPORTED = "supported"
-    UNSUPPORTED = "unsupported"
-    UNVERIFIABLE = "unverifiable"
+_SEVERITY = {
+    "supported": Severity.PASS,
+    "unsupported": Severity.FAIL,
+    "unverifiable": Severity.WARN,
+}
 
 
 class ClaimsOut(BaseModel):
@@ -31,47 +31,25 @@ class VerdictOut(BaseModel):
     evidence_quote: str | None = None
 
 
-class ClaimResult(BaseModel):
-    claim: str
-    verdict: Verdict
-    reason: str = ""
-    evidence_quote: str | None = None
-
-
-class TrajectoryScore(BaseModel):
-    final_answer: str = ""
-    results: list[ClaimResult]
-
-    @computed_field
-    @property
-    def supported(self) -> int:
-        return sum(r.verdict is Verdict.SUPPORTED for r in self.results)
-
-    @computed_field
-    @property
-    def unsupported(self) -> int:
-        return sum(r.verdict is Verdict.UNSUPPORTED for r in self.results)
-
-    @computed_field
-    @property
-    def checkable(self) -> int:
-        return self.supported + self.unsupported
-
-    @computed_field
-    @property
-    def grounding_rate(self) -> float:
-        return self.supported / self.checkable if self.checkable else 1.0
-
-
 ExtractFn = Callable[[str], list[str]]
-VerifyFn = Callable[[str, str], ClaimResult]
+VerifyFn = Callable[[str, str], Finding]
 
 
-def judge_trajectory(traj: Trajectory, extract: ExtractFn, verify: VerifyFn) -> TrajectoryScore:
+def judge_trajectory(traj: Trajectory, extract: ExtractFn, verify: VerifyFn) -> CheckResult:
     evidence = traj.evidence()
-    claims = extract(traj.final_answer)
-    results = [verify(claim, evidence) for claim in claims]
-    return TrajectoryScore(final_answer=traj.final_answer, results=results)
+    findings = [verify(claim, evidence) for claim in extract(traj.final_answer)]
+    supported = sum(f.verdict == "supported" for f in findings)
+    unsupported = sum(f.verdict == "unsupported" for f in findings)
+    checkable = supported + unsupported
+    rate = supported / checkable if checkable else 1.0
+    summary = f"{supported}/{checkable} checkable claims grounded."
+    return CheckResult(
+        check="faithfulness",
+        passed=unsupported == 0,
+        score=rate,
+        summary=summary,
+        findings=findings,
+    )
 
 
 _EXTRACT_SYSTEM = (
@@ -120,12 +98,13 @@ _VERIFY_SYSTEM = {
 }
 
 
-def grounded_verifier(claim: str, evidence: str, *, answer_kind: str = "factual") -> ClaimResult:
-    """Decide whether `evidence` entails `claim`. Sees no agent reasoning."""
+def grounded_verifier(claim: str, evidence: str, *, answer_kind: str = "factual") -> Finding:
+    """Decide whether `evidence` entails `claim`. Sees no agent reasoning. Returns a Finding."""
     if not evidence.strip():
-        return ClaimResult(
-            claim=claim,
-            verdict=Verdict.UNVERIFIABLE,
+        return Finding(
+            severity=Severity.WARN,
+            verdict="unverifiable",
+            subject=claim,
             reason="No tool-output evidence was recorded.",
         )
     out = call(
@@ -133,9 +112,10 @@ def grounded_verifier(claim: str, evidence: str, *, answer_kind: str = "factual"
         user=f"CLAIM:\n{claim}\n\nEVIDENCE (the agent's real tool outputs):\n{evidence}",
         output=VerdictOut,
     )
-    return ClaimResult(
-        claim=claim,
-        verdict=Verdict(out.verdict),
+    return Finding(
+        severity=_SEVERITY[out.verdict],
+        verdict=out.verdict,
+        subject=claim,
         reason=out.reason,
-        evidence_quote=out.evidence_quote or None,
+        evidence=out.evidence_quote or None,
     )

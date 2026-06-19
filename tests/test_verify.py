@@ -1,7 +1,8 @@
 """Faithfulness aggregation — fake extract/verify, no API."""
 
 from attest.trajectory import Trajectory, Step, ToolCall
-from attest.checks.verify import judge_trajectory, ClaimResult, Verdict, TrajectoryScore
+from attest.checks.verify import judge_trajectory
+from attest.results import Finding, Severity
 
 
 def _example() -> Trajectory:
@@ -28,36 +29,34 @@ def test_evidence_excludes_thoughts():
 
 def test_judge_aggregates_verdicts():
     traj = _example()
-
     fake_extract = lambda answer: [
         "Paris has about 2.1 million people",
         "Paris is larger than Berlin",
     ]
 
-    def fake_verify(claim: str, evidence: str) -> ClaimResult:
+    def fake_verify(claim: str, evidence: str) -> Finding:
         if "larger than Berlin" in claim:
-            return ClaimResult(claim=claim, verdict=Verdict.UNSUPPORTED,
-                               reason="Berlin 3.6M > Paris 2.1M")
-        return ClaimResult(claim=claim, verdict=Verdict.SUPPORTED, reason="matches evidence")
+            return Finding(severity=Severity.FAIL, verdict="unsupported", subject=claim,
+                           reason="Berlin 3.6M > Paris 2.1M")
+        return Finding(severity=Severity.PASS, verdict="supported", subject=claim)
 
-    score: TrajectoryScore = judge_trajectory(traj, fake_extract, fake_verify)
-    assert score.supported == 1
-    assert score.unsupported == 1
-    assert score.checkable == 2
-    assert score.grounding_rate == 0.5
+    result = judge_trajectory(traj, fake_extract, fake_verify)
+    assert result.check == "faithfulness"
+    assert result.score == 0.5
+    assert result.passed is False
+    assert len(result.failures) == 1
 
 
 def test_unverifiable_excluded_from_rate():
-    traj = _example()
     fake_extract = lambda a: ["c1", "c2", "c3"]
 
     def fake_verify(claim, evidence):
         return {
-            "c1": ClaimResult(claim="c1", verdict=Verdict.SUPPORTED),
-            "c2": ClaimResult(claim="c2", verdict=Verdict.UNVERIFIABLE),
-            "c3": ClaimResult(claim="c3", verdict=Verdict.SUPPORTED),
+            "c1": Finding(severity=Severity.PASS, verdict="supported", subject="c1"),
+            "c2": Finding(severity=Severity.WARN, verdict="unverifiable", subject="c2"),
+            "c3": Finding(severity=Severity.PASS, verdict="supported", subject="c3"),
         }[claim]
 
-    score = judge_trajectory(traj, fake_extract, fake_verify)
-    assert score.checkable == 2
-    assert score.grounding_rate == 1.0
+    result = judge_trajectory(_example(), fake_extract, fake_verify)
+    assert result.score == 1.0
+    assert result.passed is True

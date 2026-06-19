@@ -3,7 +3,6 @@
 import attest.checks.judge_baseline as jb
 import attest.checks.verify as v
 from attest.trajectory import Trajectory
-from attest.checks.verify import Verdict
 
 
 def test_extract_claims_parses(monkeypatch):
@@ -25,9 +24,9 @@ def test_grounded_verifier_parses_contradiction(monkeypatch):
                                  evidence_quote="Berlin 3,677,000"),
     )
     r = v.grounded_verifier("Paris is larger than Berlin", "Berlin 3,677,000; Paris 2,103,000")
-    assert r.verdict is Verdict.UNSUPPORTED
+    assert r.verdict == "unsupported"
     assert "Berlin" in r.reason
-    assert r.evidence_quote == "Berlin 3,677,000"
+    assert r.evidence == "Berlin 3,677,000"
 
 
 def test_grounded_verifier_no_evidence_is_unverifiable(monkeypatch):
@@ -35,7 +34,7 @@ def test_grounded_verifier_no_evidence_is_unverifiable(monkeypatch):
         raise AssertionError("must not call the LLM when there's no evidence")
     monkeypatch.setattr(v, "call", boom)
     r = v.grounded_verifier("some claim", "   ")
-    assert r.verdict is Verdict.UNVERIFIABLE
+    assert r.verdict == "unverifiable"
 
 
 def test_naive_judge_parses(monkeypatch):
