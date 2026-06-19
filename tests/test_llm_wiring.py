@@ -1,8 +1,4 @@
-"""
-Tests for the LLM-backed functions WITHOUT hitting the API. We monkeypatch the
-`call()` helper in each module so we test our wiring deterministically and for free.
-`call()` now returns a validated Pydantic output model, so the fakes return models too.
-"""
+"""LLM-backed functions with `call` monkeypatched — no API."""
 
 import attest.checks.judge_baseline as jb
 import attest.checks.verify as v
@@ -51,7 +47,6 @@ def test_naive_judge_parses(monkeypatch):
 
 
 def test_naive_judge_renders_full_trajectory():
-    # The whole point of the baseline: it DOES include the narrative.
     from attest.trajectory import Step, ToolCall
     traj = Trajectory(
         task="compare",
@@ -60,6 +55,21 @@ def test_naive_judge_renders_full_trajectory():
         final_answer="the answer is 42",
     )
     rendered = jb._render(traj)
-    assert "secret reasoning" in rendered      # narrative is included (unlike attest)
+    assert "secret reasoning" in rendered
     assert "42" in rendered
     assert "the answer is 42" in rendered
+
+
+def test_verifier_uses_factual_standard_by_default(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(v, "call", lambda **k: seen.update(k) or v.VerdictOut(verdict="supported"))
+    v.grounded_verifier("claim", "evidence")
+    assert "fact-checker" in seen["system"].lower()
+
+
+def test_verifier_uses_plan_standard_when_asked(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(v, "call", lambda **k: seen.update(k) or v.VerdictOut(verdict="supported"))
+    v.grounded_verifier("the API will intercept requests", "Plan: intercept requests", answer_kind="plan")
+    sys = seen["system"].lower()
+    assert "plan" in sys and "runtime" in sys
