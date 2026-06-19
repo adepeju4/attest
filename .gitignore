@@ -1,0 +1,23 @@
+# Python / uv
+__pycache__/
+*.py[oc]
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Test / lint caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Secrets — never commit the API key
+.env
+.env.*
+!.env.example
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
