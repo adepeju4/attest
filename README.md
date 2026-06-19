@@ -37,6 +37,10 @@ final answer) across dimensions and returns one combined report:
   the verdict.
 - **Tool-use correctness** — were the right tools called, with no unhandled errors?
   Deterministic by default (no API key); an optional LLM check judges tool *choice*.
+- **Prompt-injection flag** — scans untrusted tool outputs for injection payloads
+  (deterministic) and, with `--deep`, an *effect-based* check for whether the agent took
+  an action the principal never authorized — catching **novel** injections, not just known
+  phrasings like "ignore previous instructions".
 - **One report** — an `overall_score`, per-dimension scores, and Wilson 95% confidence
   intervals, all serializable to JSON.
 - **Framework-agnostic** — a LangChain/LangGraph adapter turns any agent run into a
@@ -52,6 +56,7 @@ each claim   ──verify against──▶ supported · unsupported · unverifia
                   evidence
 
 tool calls   ──allowed? error-handled? appropriate?──▶ tool-use score
+tool outputs ──payload scan + authorization check────▶ injection findings (suspicious / compromised)
                               │
                               ▼
               one TrajectoryReport  (overall + per-dimension + 95% CIs)
@@ -65,10 +70,11 @@ agent's reasoning.** That's what keeps it grounded.
 **CLI**
 
 ```bash
-attest stats 41 50              # a pass rate with its Wilson 95% CI (no API key)
-attest tools trajectory.json    # tool-use correctness — deterministic, no API key
-attest run   trajectory.json    # full report: faithfulness + tool-use + overall
-attest demo  trajectory.json    # naive LLM-judge vs attest, side by side
+attest stats 41 50                # a pass rate with its Wilson 95% CI (no API key)
+attest tools trajectory.json      # tool-use correctness — deterministic, no API key
+attest injection trajectory.json  # prompt-injection scan — deterministic, no API key
+attest run   trajectory.json      # full report: faithfulness + tool-use + overall
+attest demo  trajectory.json      # naive LLM-judge vs attest, side by side
 ```
 
 **Library**
@@ -87,7 +93,7 @@ print(report.model_dump_json(indent=2))
 ## Develop
 
 ```bash
-uv run pytest                   # 32 tests, no API key needed (the LLM is mocked/injected)
+uv run pytest                   # 37 tests, no API key needed (the LLM is mocked/injected)
 ```
 
 Running the CLI from source before install: prefix with `uv run` (e.g. `uv run attest stats 41 50`).
@@ -102,6 +108,7 @@ src/attest/
 ├── checks/              # the evaluation dimensions
 │   ├── verify.py          # faithfulness: extract_claims + grounded_verifier
 │   ├── tool_use.py        # tool-use correctness (deterministic + optional LLM)
+│   ├── injection.py       # prompt-injection: payload scan + authorization check
 │   └── judge_baseline.py  # the naive LLM-as-judge attest is built to beat
 ├── scoring/
 │   ├── report.py          # evaluate() -> combined TrajectoryReport + overall_score
@@ -109,11 +116,12 @@ src/attest/
 └── adapters/
     └── langgraph.py       # LangChain/LangGraph run -> Trajectory
 tests/                   # all offline (the LLM is mocked/injected)
-examples/                # sample trajectories + codesprint_to_attest.py (live integration)
+examples/                # sample trajectories (clean, gamed, injection)
 ```
 
 ## Status
 
-Early but working. **Faithfulness** and **tool-use correctness** are built, tested, and
-validated live against a real LangGraph agent. Next up: self-contradiction and a
-prompt-injection flag. Not yet on PyPI.
+Early but working. **Faithfulness**, **tool-use correctness**, and a **prompt-injection
+flag** (deterministic scan + effect-based authorization check) are built, tested, and
+validated live against a real LangGraph agent. Next up: an answer-type-aware verifier and
+self-contradiction. Not yet on PyPI.

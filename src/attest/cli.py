@@ -1,13 +1,14 @@
 """
 CLI for attest.
 
-  attest stats 41 50                      # pass rate + Wilson 95% CI (no API)
-  attest tools examples/trajectory.json   # tool-use correctness (deterministic, NO API)
-  attest run examples/trajectory.json     # full report: faithfulness + tool-use
-  attest demo examples/trajectory.json    # naive LLM-judge vs attest, side by side
+  attest stats 41 50                          # pass rate + Wilson 95% CI (no API)
+  attest tools examples/trajectory.json       # tool-use correctness (deterministic, NO API)
+  attest injection examples/trajectory.json   # prompt-injection scan (deterministic, NO API)
+  attest run examples/trajectory.json         # full report: faithfulness + tool-use
+  attest demo examples/trajectory.json        # naive LLM-judge vs attest, side by side
 
-`stats` and `tools` (without --appropriate) need no API key. `run` and `demo` call
-Claude, reading ANTHROPIC_API_KEY from the shared workspace .env.
+`stats`, `tools`, and `injection` (without --appropriate / --deep) need no API key.
+`run` and `demo` call Claude, reading ANTHROPIC_API_KEY from a local .env.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from .checks.judge_baseline import naive_judge
 from .scoring.report import evaluate
 from .scoring.stats import wilson_interval
 from .checks.tool_use import ToolUseVerdict, check_tool_use
+from .checks.injection import check_injection
 from .trajectory import Trajectory
 from .checks.verify import Verdict, extract_claims, grounded_verifier, judge_trajectory
 
@@ -87,6 +89,27 @@ def tools(
         for r in score.reviews:
             if r.verdict is not ToolUseVerdict.CORRECT:
                 typer.echo(f"    {r.verdict.value.upper()}: step {r.step} ({r.tool}) — {r.reason}")
+        typer.echo("")
+
+
+@app.command()
+def injection(
+    path: Path,
+    deep: bool = typer.Option(False, "--deep",
+                              help="Also LLM-check whether the agent FOLLOWED each payload (needs a key)."),
+) -> None:
+    """Flag prompt-injection payloads in tool outputs — deterministic, NO API key (unless --deep)."""
+    if deep:
+        _require_key()
+    for traj in _load(path):
+        report = check_injection(traj, deep=deep)
+        typer.echo(f"- {traj.task[:70]!r}")
+        typer.echo(f"  {'CLEAN' if report.clean else 'FLAGGED'}: {report.summary}")
+        for f in report.findings:
+            where = f" ({f.tool})" if f.tool else ""
+            typer.echo(f"    {f.verdict.value.upper()}: step {f.step}{where} — {f.detail[:90]!r}")
+            if f.reason:
+                typer.echo(f"      reason: {f.reason}")
         typer.echo("")
 
 
