@@ -1,26 +1,18 @@
-"""
-Statistical rigor — the second gap the research surfaced.
-
-Most eval tools report a bare pass rate ("82%") with no error bars, so teams
-chase differences that are pure noise. attest reports a **Wilson confidence
-interval** on every pass rate and refuses to call A>B unless the gap clears noise.
-
-All pure functions, no dependencies, no API — fully unit-testable.
-"""
+"""Wilson confidence intervals and two-proportion significance for pass rates."""
 
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass
 
-Z_95 = 1.96  # z-score for a 95% interval
+Z_95 = 1.96
 
 
 @dataclass(frozen=True)
 class Proportion:
-    rate: float      
-    low: float        
-    high: float       
+    rate: float
+    low: float
+    high: float
     n: int
 
     def pct(self) -> str:
@@ -28,11 +20,7 @@ class Proportion:
 
 
 def wilson_interval(successes: int, n: int, z: float = Z_95) -> Proportion:
-    """
-    Wilson score interval for a binomial proportion. Better than the naive
-    normal approximation for small n and rates near 0 or 1 (it never escapes
-    [0, 1] and isn't degenerate when successes==0 or successes==n).
-    """
+    """Wilson score interval for a binomial proportion."""
     if n == 0:
         return Proportion(0.0, 0.0, 0.0, 0)
     p = successes / n
@@ -57,8 +45,5 @@ def two_proportion_z(s_a: int, n_a: int, s_b: int, n_b: int) -> float:
 
 def difference_is_real(s_a: int, n_a: int, s_b: int, n_b: int,
                        z_threshold: float = Z_95) -> bool:
-    """
-    True only if A and B differ beyond noise at ~95%. Use this to stop reporting
-    'model A wins' when the gap is within the margin of error.
-    """
+    """True only if A and B differ beyond noise at ~95%."""
     return abs(two_proportion_z(s_a, n_a, s_b, n_b)) >= z_threshold

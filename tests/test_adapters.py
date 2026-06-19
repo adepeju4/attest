@@ -1,8 +1,4 @@
-"""
-Tests for the LangGraph adapter using fake message objects — no langchain needed.
-We mimic the shape LangChain produces (HumanMessage / AIMessage.tool_calls /
-ToolMessage.tool_call_id) so the adapter is verified offline.
-"""
+"""LangGraph adapter — fake message objects, no langchain."""
 
 from attest.adapters.langgraph import from_langgraph_messages
 
@@ -48,7 +44,6 @@ def test_adapts_a_codesprint_like_run():
     assert len(traj.steps) == 2
     assert traj.steps[0].tool_call.name == "understand_code_snippet"
     assert traj.steps[0].tool_call.output.startswith("It's an iterative")
-    # evidence = the real tool outputs, NOT the final answer
     assert "O(log n)" in traj.evidence()
     assert "final review" not in traj.evidence()
     assert traj.final_answer == "A clean O(log n) binary search."
@@ -62,7 +57,6 @@ def test_defaults_final_answer_to_last_ai_message():
 
 
 def test_handles_gemini_block_content():
-    # Gemini returns content as a list of blocks; the adapter should flatten it.
     messages = [
         HumanMessage([{"type": "text", "text": "do a thing"}]),
         AIMessage([{"type": "text", "text": "done"}]),
@@ -79,8 +73,8 @@ def test_captures_system_prompt_and_allowed_tools():
         AIMessage("done"),
     ]
     traj = from_langgraph_messages(messages, allowed_tools=["understand", "reason"])
-    assert traj.system_prompt.startswith("You are a dev assistant")  # auto-detected
-    assert traj.allowed_tools == ["understand", "reason"]             # passed in
+    assert traj.system_prompt.startswith("You are a dev assistant")
+    assert traj.allowed_tools == ["understand", "reason"]
 
 
 def test_defaults_authority_fields_to_none():
@@ -103,8 +97,6 @@ def test_tool_calls_helper():
 
 
 def test_response_tool_is_excluded():
-    # ToolStrategy/structured-output emits the final answer as a synthetic tool call;
-    # it must NOT be counted as a real tool-use decision.
     messages = [
         HumanMessage("review this"),
         AIMessage(tool_calls=[{"name": "search", "args": {}, "id": "1"}]),

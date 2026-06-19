@@ -1,13 +1,4 @@
-"""
-The naive LLM-as-judge — the baseline attest exists to beat.
-
-This is what most eval setups do: hand the model the WHOLE trajectory (including
-the agent's reasoning/narrative) and ask "is this a good answer?". Because it
-reads the story, a confident-but-wrong answer can talk it into a PASS.
-
-attest refuses to read the story — it only checks claims against real tool
-outputs. This judge is here so the demo can show, side by side, what that buys you.
-"""
+"""The naive LLM-as-judge baseline: reads the full trajectory and grades the answer."""
 
 from __future__ import annotations
 
@@ -32,7 +23,6 @@ class JudgeVerdict(BaseModel):
 
 
 def _render(traj: Trajectory) -> str:
-    """Render the FULL trajectory — narrative included. That inclusion is the point."""
     lines = [f"TASK: {traj.task}", ""]
     for step in traj.steps:
         if step.thought:
@@ -45,5 +35,4 @@ def _render(traj: Trajectory) -> str:
 
 
 def naive_judge(traj: Trajectory) -> JudgeVerdict:
-    """The 'does this look good?' judge — sees everything, narrative and all."""
     return call(system=_JUDGE_SYSTEM, user=_render(traj), output=JudgeVerdict)

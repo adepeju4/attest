@@ -1,19 +1,4 @@
-"""
-Tool-use correctness — judge HOW the agent used its tools, separate from whether
-the final answer is faithful. An agent can answer faithfully while calling the
-wrong tool, ignoring a tool error, or passing junk arguments.
-
-Three per-call checks, deterministic-first (the rule that keeps this from being the
-vibes-based LLM-judge attest is built to beat):
-
-  1. allowed        - is the tool in the agent's declared `allowed_tools`?   (deterministic)
-  2. error_handled  - did the output look like a failure, and if so did a later
-                      step address it rather than barrel on?                  (deterministic)
-  3. appropriate    - was this a reasonable tool for the step, per its
-                      description?  (optional, grounded LLM — the only paid part)
-
-attest NEVER executes a tool. This reads the recorded trajectory only.
-"""
+"""Tool-use correctness: allowed-tool + error-handling checks, optional LLM appropriateness."""
 
 from __future__ import annotations
 
@@ -36,15 +21,15 @@ class ToolCallReview(BaseModel):
     tool: str
     verdict: ToolUseVerdict
     allowed: bool
-    error_handled: bool | None        # None = no error occurred
-    appropriate: bool | None = None   # None = not checked (fast mode)
+    error_handled: bool | None
+    appropriate: bool | None = None
     reason: str = ""
     evidence_quote: str | None = None
 
 
 class ToolUseScore(BaseModel):
     reviews: list[ToolCallReview]
-    summary: str = ""                 # single statement validating the tools called
+    summary: str = ""
 
     @computed_field
     @property
@@ -59,14 +44,10 @@ class ToolUseScore(BaseModel):
     @computed_field
     @property
     def correct_rate(self) -> float:
-        """Fraction of tool calls that were correct. 1.0 if no calls were made."""
         return self.correct / self.total if self.total else 1.0
 
 
-# --- deterministic helpers (no model) --------------------------------------- #
-
 def _looks_like_error(output: str) -> bool:
-    """Conservative: empty output, or an error/exception/traceback shape."""
     o = output.strip()
     if not o:
         return True
@@ -80,11 +61,8 @@ def _looks_like_error(output: str) -> bool:
 
 
 def _handled_later(traj: Trajectory, error_step: int) -> bool:
-    """An error is 'handled' if the agent made another tool call after it."""
     return any(i > error_step for i, _ in traj.tool_calls())
 
-
-# --- optional LLM check ------------------------------------------------------ #
 
 class _AppropriatenessOut(BaseModel):
     """Whether the tool call was a reasonable choice for the step."""
@@ -112,8 +90,6 @@ def _check_appropriate(traj: Trajectory, tc: ToolCall) -> _AppropriatenessOut:
     return call(system=_APPROPRIATE_SYSTEM, user=user, output=_AppropriatenessOut)
 
 
-# --- the feature ------------------------------------------------------------- #
-
 def _review_call(traj: Trajectory, idx: int, tc: ToolCall,
                  allowed_set: set[str], appropriate: bool) -> ToolCallReview:
     allowed = (not allowed_set) or (tc.name in allowed_set)
@@ -131,7 +107,6 @@ def _review_call(traj: Trajectory, idx: int, tc: ToolCall,
                               error_handled=error_handled, appropriate=appropriate_flag,
                               reason=reason, evidence_quote=quote)
 
-    # worst issue wins
     if not allowed:
         return review(ToolUseVerdict.INCORRECT,
                       f"'{tc.name}' is not in the agent's allowed tools "
@@ -163,13 +138,7 @@ def _summarize(reviews: list[ToolCallReview]) -> str:
 
 
 def check_tool_use(traj: Trajectory, *, appropriate: bool = False) -> ToolUseScore:
-    """
-    Review each tool call in the trajectory.
-
-    `appropriate=False` (default, "fast") runs the two deterministic checks only —
-    free and fully objective. `appropriate=True` ("thorough") also runs the grounded
-    LLM tool-choice check (one model call per tool call).
-    """
+    """Review each tool call. `appropriate=True` adds the LLM tool-choice check."""
     allowed_set = set(traj.allowed_tools or [])
     reviews = [
         _review_call(traj, idx, tc, allowed_set, appropriate)

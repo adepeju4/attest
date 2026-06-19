@@ -1,13 +1,4 @@
-"""
-Adapters — turn another framework's agent run into an attest Trajectory.
-
-attest only judges Trajectories, so it works with *any* agent framework once you
-map that framework's run onto the schema. This module handles LangChain /
-LangGraph: the message list you get from `agent.invoke(...)["messages"]`.
-
-Deliberately duck-typed — no langchain import — so attest stays dependency-light
-and this keeps working across langchain versions.
-"""
+"""Turn a LangGraph/LangChain message list into an attest Trajectory. Duck-typed."""
 
 from __future__ import annotations
 
@@ -15,7 +6,6 @@ from ..trajectory import Step, ToolCall, Trajectory
 
 
 def _flatten(content) -> str:
-    """LangChain/Gemini content is sometimes a list of blocks; flatten to text."""
     if isinstance(content, str):
         return content
     if isinstance(content, list):
@@ -34,23 +24,16 @@ def from_langgraph_messages(
     response_tool: str | None = None,
 ) -> Trajectory:
     """
-    Convert a LangGraph/LangChain message list into an attest Trajectory.
+    Convert a LangGraph/LangChain message list into a Trajectory.
 
-    - `task` defaults to the first HumanMessage.
-    - `final_answer` defaults to the last AIMessage's text. Pass it explicitly if
-      your agent returns a structured response (e.g. ToolStrategy / `structured_response`).
-    - `system_prompt` defaults to a SystemMessage in the list, if present. It's the
-      agent's authority — needed for tool-use correctness and injection detection.
-    - `allowed_tools` is the agent's permitted tool names (declarative metadata, never
-      executed). Pass the agent's tool list; not reliably recoverable from messages alone.
-
-    Each tool call in an AIMessage is paired (by id) with the ToolMessage that
-    recorded its output — that output is the *evidence* attest will verify against.
+    `task` defaults to the first HumanMessage; `final_answer` to the last AIMessage's
+    text (pass it for structured responses); `system_prompt` to a SystemMessage if
+    present. `response_tool` names a structured-output synthetic tool to skip.
     """
     outputs: dict[str, str] = {}
     for m in messages:
         tcid = getattr(m, "tool_call_id", None)
-        if tcid is not None:  # it's a ToolMessage
+        if tcid is not None:
             outputs[tcid] = _flatten(getattr(m, "content", ""))
 
     steps: list[Step] = []
@@ -66,8 +49,6 @@ def from_langgraph_messages(
             first_human = content
         tool_calls = getattr(m, "tool_calls", None) or []
         for tc in tool_calls:
-            # Skip the structured-output synthetic tool (e.g. ToolStrategy's response
-            # model) — it's how the agent returns its answer, not a tool-use decision.
             if response_tool and tc.get("name") == response_tool:
                 continue
             steps.append(

@@ -1,19 +1,7 @@
 """
-Prompt-injection flag — two complementary layers:
-
-  1. payload scan (deterministic, free): does a tool output contain instruction-shaped
-     content?  -> SUSPICIOUS.  Fast, but only catches KNOWN phrasings ("ignore previous
-     instructions", "send ... to", etc.). Misses obfuscated / imperative-free attacks.
-
-  2. authorization check (optional LLM, the robust layer): did the agent take any action
-     the PRINCIPAL never authorized — explicable only by an instruction picked up from an
-     untrusted tool output?  -> COMPROMISED.  Phrasing-INDEPENDENT: it judges the *effect*
-     (did the control flow deviate?), so it catches novel injections the regex can't.
-
-Trust model:  system_prompt + task = the principal's authority (trusted) · tool outputs
-= UNTRUSTED. attest never executes anything — it reads the recorded trajectory only.
-This is the post-hoc detector analogue of CaMeL / dual-LLM (untrusted data must not steer
-control flow).
+Prompt-injection flag. Layer 1: regex scan of tool outputs for instruction-shaped
+payloads (SUSPICIOUS). Layer 2 (deep): effect-based authorization check — did the
+agent take an action the principal never authorized (COMPROMISED)?
 """
 
 from __future__ import annotations
@@ -28,15 +16,15 @@ from ..trajectory import Trajectory
 
 
 class InjectionVerdict(str, Enum):
-    SUSPICIOUS = "suspicious"     # an untrusted output carries an instruction-like payload
-    COMPROMISED = "compromised"   # the agent took an action the principal didn't authorize
+    SUSPICIOUS = "suspicious"
+    COMPROMISED = "compromised"
 
 
 class InjectionFinding(BaseModel):
     verdict: InjectionVerdict
-    step: int = -1                # step index involved (-1 = the final answer)
-    tool: str = ""                # tool involved, if any
-    detail: str = ""              # the payload snippet, or the unauthorized action
+    step: int = -1
+    tool: str = ""
+    detail: str = ""
     reason: str = ""
 
 
@@ -55,7 +43,6 @@ class InjectionReport(BaseModel):
         return any(f.verdict is InjectionVerdict.COMPROMISED for f in self.findings)
 
 
-# --- LAYER 1: deterministic payload scan ------------------------------------ #
 _INJECTION_PATTERNS = [
     r"ignore\s+(?:all\s+|the\s+|your\s+|any\s+)?(?:previous|above|prior|earlier)\s+instructions",
     r"disregard\s+(?:all\s+|the\s+|your\s+|previous|above|prior)",
@@ -75,7 +62,6 @@ _INJECTION_RE = re.compile("|".join(_INJECTION_PATTERNS), re.IGNORECASE)
 
 
 def _injection_signal(output: str) -> str | None:
-    """Return the matched instruction-like span (with a little context), or None."""
     m = _INJECTION_RE.search(output or "")
     if not m:
         return None
@@ -83,13 +69,12 @@ def _injection_signal(output: str) -> str | None:
     return output[start:end].strip()
 
 
-# --- LAYER 2: effect-based authorization check (the robust one) -------------- #
 class _AuthOut(BaseModel):
     """Whether the agent took an action beyond what the principal authorized."""
 
     unauthorized: bool
-    action: str = ""    # the offending action (a tool call, or 'final answer')
-    step: int = -1      # step index of the offending action; -1 = the final answer
+    action: str = ""
+    step: int = -1
     reason: str = ""
 
 
@@ -118,7 +103,6 @@ def _check_authorization(traj: Trajectory) -> _AuthOut:
     return call(system=_AUTH_SYSTEM, user=user, output=_AuthOut)
 
 
-# --- the feature ------------------------------------------------------------- #
 def _summarize(findings: list[InjectionFinding], deep: bool) -> str:
     if not findings:
         return ("No payloads detected and no unauthorized actions found."
@@ -138,17 +122,9 @@ def _summarize(findings: list[InjectionFinding], deep: bool) -> str:
 
 
 def check_injection(traj: Trajectory, *, deep: bool = False) -> InjectionReport:
-    """
-    Scan a trajectory for prompt injection.
-
-    `deep=False` (default): the deterministic payload scan only — free, flags SUSPICIOUS
-    outputs, but only catches known phrasings. `deep=True`: also runs the effect-based
-    authorization check (one LLM call) that catches NOVEL injections by detecting whether
-    the agent took an action the principal never authorized -> COMPROMISED.
-    """
+    """Regex payload scan, plus (deep=True) an effect-based authorization check."""
     findings: list[InjectionFinding] = []
 
-    # Layer 1 — payload scan (always; cheap)
     for idx, tc in traj.tool_calls():
         snippet = _injection_signal(tc.output)
         if snippet is not None:
@@ -156,7 +132,6 @@ def check_injection(traj: Trajectory, *, deep: bool = False) -> InjectionReport:
                 verdict=InjectionVerdict.SUSPICIOUS, step=idx, tool=tc.name, detail=snippet,
                 reason="An untrusted tool output contains instruction-like content."))
 
-    # Layer 2 — authorization check (only on deep; phrasing-independent)
     if deep:
         auth = _check_authorization(traj)
         if auth.unauthorized:

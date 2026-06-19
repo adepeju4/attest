@@ -1,7 +1,4 @@
-"""
-Tool-use correctness — the deterministic checks are tested with no API at all.
-The optional `appropriate` LLM check is tested by mocking `call`.
-"""
+"""Tool-use correctness — deterministic checks offline, `appropriate` mocks `call`."""
 
 import attest.checks.tool_use as tu
 from attest.checks.tool_use import ToolUseVerdict, check_tool_use
@@ -9,7 +6,6 @@ from attest.trajectory import Step, ToolCall, Trajectory
 
 
 def _traj(*calls, allowed=None, system_prompt=None, task="do a thing"):
-    """calls = (name, args, output) tuples."""
     steps = [Step(tool_call=ToolCall(name=n, arguments=a, output=o)) for n, a, o in calls]
     return Trajectory(task=task, system_prompt=system_prompt, allowed_tools=allowed,
                       steps=steps, final_answer="done")
@@ -32,7 +28,7 @@ def test_all_allowed_no_errors_is_correct():
 def test_disallowed_tool_is_incorrect():
     traj = _traj(
         ("search", {}, "ok"),
-        ("delete_everything", {}, "done"),  # not in allowed set
+        ("delete_everything", {}, "done"),
         allowed=["search", "summarize"],
     )
     score = check_tool_use(traj)
@@ -43,7 +39,6 @@ def test_disallowed_tool_is_incorrect():
 
 
 def test_unhandled_error_is_incorrect():
-    # error in the LAST tool call, then straight to the answer -> not handled
     traj = _traj(
         ("search", {}, "ok"),
         ("fetch", {}, "Error: connection refused"),
@@ -57,7 +52,6 @@ def test_unhandled_error_is_incorrect():
 
 
 def test_handled_error_is_correct():
-    # error, then a later tool call -> the agent did something about it
     traj = _traj(
         ("fetch", {}, "Error: timeout"),
         ("fetch", {}, "ok this time"),
@@ -70,7 +64,7 @@ def test_handled_error_is_correct():
 
 
 def test_no_allowed_list_means_cannot_disallow():
-    traj = _traj(("anything", {}, "ok"))  # allowed_tools is None
+    traj = _traj(("anything", {}, "ok"))
     score = check_tool_use(traj)
     assert score.reviews[0].allowed is True
     assert score.reviews[0].verdict is ToolUseVerdict.CORRECT
@@ -85,7 +79,6 @@ def test_no_tool_calls():
 
 
 def test_appropriate_check_can_fail(monkeypatch):
-    # thorough mode: mock the LLM tool-choice check to say "inappropriate"
     monkeypatch.setattr(
         tu, "call",
         lambda **k: tu._AppropriatenessOut(appropriate=False, reason="wrong tool for this"),
@@ -103,4 +96,4 @@ def test_fast_mode_skips_llm(monkeypatch):
         raise AssertionError("fast mode must not call the LLM")
     monkeypatch.setattr(tu, "call", boom)
     score = check_tool_use(_traj(("search", {}, "ok"), allowed=["search"]))
-    assert score.reviews[0].appropriate is None  # not checked
+    assert score.reviews[0].appropriate is None
