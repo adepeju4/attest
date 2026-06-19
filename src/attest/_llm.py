@@ -43,15 +43,38 @@ def call(
     system: str,
     user: str,
     output: type[T],
-    max_tokens: int = 1024,
+    max_tokens: int = 4096,
     client: instructor.Instructor | None = None,
+    attempts: int = 3,
 ) -> T:
-    """Return a validated instance of the Pydantic `output` model from the LLM."""
-    return (client or _resolve_client()).create(
-        response_model=output,
-        max_tokens=max_tokens,
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-    )
+    """
+    Return a validated instance of the Pydantic `output` model from the LLM.
+
+    Thinking models (e.g. Gemini 2.5) can spend their whole output budget reasoning
+    and return an empty candidate, which surfaces as a `'NoneType' ... 'parts'` crash.
+    Those are transient, so retry a few times, then fail with a clear message.
+    """
+    c = client or _resolve_client()
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+    last_err: Exception | None = None
+    for _ in range(max(1, attempts)):
+        try:
+            return c.create(response_model=output, max_tokens=max_tokens, messages=messages)
+        except Exception as e:
+            if not _is_empty_response(e):
+                raise
+            last_err = e
+    raise RuntimeError(
+        "The provider returned no parseable content after several attempts — often a "
+        "thinking model exhausting its output-token budget, or a safety/recitation block. "
+        "Try a larger max_tokens or a different model."
+    ) from last_err
+
+
+def _is_empty_response(err: Exception) -> bool:
+    """An empty/blocked provider candidate (vs a real, non-retryable error)."""
+    text = f"{type(err).__name__}: {err}"
+    return "InstructorRetry" in text or "has no attribute 'parts'" in text

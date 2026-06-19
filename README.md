@@ -133,7 +133,7 @@ small/fast model per provider: cents, not dollars.
 ## Develop
 
 ```bash
-uv run pytest                   # 63 tests, no API key needed (the LLM is mocked/injected)
+uv run pytest                   # 66 tests, no API key needed (the LLM is mocked/injected)
 ```
 
 Running the CLI from source before install: prefix with `uv run` (e.g. `uv run attest stats 41 50`).
