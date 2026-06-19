@@ -1,6 +1,6 @@
 [project]
 name = "agent-attest"
-version = "0.3.1"
+version = "0.3.2"
 description = "Evidence-grounded evaluator for AI agent trajectories — judge by verifying claims against real tool outputs, not LLM-judge vibes."
 readme = "README.md"
 requires-python = ">=3.11"

@@ -50,6 +50,14 @@ def test_layer2_clean_when_agent_did_not_deviate(monkeypatch):
     assert "did not take any unauthorized action" in report.summary
 
 
+def test_authorization_prompt_excludes_user_jailbreaks(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(inj, "call", lambda **k: seen.update(k) or inj._AuthOut(unauthorized=False))
+    check_injection(_traj("some tool output"), deep=True)
+    sys = seen["system"].lower()
+    assert "untrusted" in sys and "jailbreak" in sys
+
+
 def test_fast_mode_skips_llm(monkeypatch):
     def boom(**k):
         raise AssertionError("fast mode must not call the LLM")
