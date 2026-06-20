@@ -52,9 +52,12 @@ verdict. (Like any defense against this, it lowers the risk rather than eliminat
 
 ## Why this works
 
-The trick is simple: when attest checks a statement, it looks **only at the statement and
-the real tool output — never at the agent's own explanation of what it did.** So an agent
-can't talk its way to a passing grade with confident wording. The receipts decide.
+attest still uses a model to judge — but it **constrains** that judgment to a narrow
+question: *does this one statement follow from this specific evidence?* The model sees
+**only the statement and the real tool output — never the agent's reasoning or narrative.**
+That's the difference from a holistic "is this answer good?" grader: same kind of model,
+far less room to be talked into a passing grade by confident wording. It's constrained,
+evidence-grounded judgment — not removed judgment. The receipts decide.
 
 ## Try it
 
