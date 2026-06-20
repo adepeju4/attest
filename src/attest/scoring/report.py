@@ -8,7 +8,7 @@ from typing import Callable, Sequence
 from ..checks.injection import check_injection
 from ..checks.role import check_role_adherence
 from ..checks.tool_use import check_tool_use
-from ..checks.verify import extract_claims, grounded_verifier, judge_trajectory
+from ..checks.verify import MAX_CLAIMS, extract_claims, judge_trajectory, verify_claims
 from ..results import CheckResult, Report
 from ..trajectory import Trajectory
 
@@ -22,6 +22,7 @@ def evaluate(
     appropriate: bool = False,
     answer_kind: str = "factual",
     deep: bool = True,
+    max_claims: int = MAX_CLAIMS,
     extract: Callable[[str], list[str]] = extract_claims,
     verify=None,
 ) -> Report:
@@ -29,13 +30,13 @@ def evaluate(
     Run the chosen checks and return one Report. `checks` picks any of
     "faithfulness", "tool_use", "injection", "role" (default: faithfulness + tool_use).
     Faithfulness/role and injection's `deep` pass need an API key; the tool-use and
-    shallow-injection paths do not.
+    shallow-injection paths do not. `max_claims` caps how many claims faithfulness checks.
     """
     if verify is None:
-        verify = partial(grounded_verifier, answer_kind=answer_kind)
+        verify = partial(verify_claims, answer_kind=answer_kind)
 
     runners = {
-        "faithfulness": lambda: judge_trajectory(traj, extract, verify),
+        "faithfulness": lambda: judge_trajectory(traj, extract, verify, max_claims=max_claims),
         "tool_use": lambda: check_tool_use(traj, appropriate=appropriate),
         "injection": lambda: check_injection(traj, deep=deep),
         "role": lambda: check_role_adherence(traj),

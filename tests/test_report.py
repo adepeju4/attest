@@ -9,10 +9,14 @@ def _fake_extract(_answer):
     return ["claim A", "claim B"]
 
 
-def _fake_verify(claim, _evidence) -> Finding:
-    if "A" in claim:
-        return Finding(severity=Severity.PASS, verdict="supported", subject=claim)
-    return Finding(severity=Severity.FAIL, verdict="unsupported", subject=claim)
+def _fake_verify(claims, _evidence) -> list[Finding]:
+    out = []
+    for claim in claims:
+        if "A" in claim:
+            out.append(Finding(severity=Severity.PASS, verdict="supported", subject=claim))
+        else:
+            out.append(Finding(severity=Severity.FAIL, verdict="unsupported", subject=claim))
+    return out
 
 
 def _traj():

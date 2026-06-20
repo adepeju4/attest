@@ -13,7 +13,7 @@ from .checks.judge_baseline import naive_judge
 from .checks.injection import check_injection
 from .checks.role import check_role_adherence
 from .checks.tool_use import check_tool_use
-from .checks.verify import extract_claims, grounded_verifier, judge_trajectory
+from .checks.verify import extract_claims, judge_trajectory, verify_claims
 from .providers import DEFAULT_PROVIDER, build_client, list_models, providers, resolve_key
 from .results import CheckResult, Report, Severity
 from .scoring.report import DEFAULT_CHECKS, evaluate
@@ -174,7 +174,7 @@ def demo(
             typer.echo("Naive LLM-judge (reads the agent's reasoning):")
             typer.echo(f"  {'PASS' if verdict.passed else 'FAIL'} - {verdict.reason}\n")
 
-            result = judge_trajectory(traj, extract_claims, grounded_verifier)
+            result = judge_trajectory(traj, extract_claims, verify_claims)
             typer.echo("attest (checks claims against real tool outputs only):")
             typer.echo(f"  grounding {result.score:.0%}  ({result.summary})")
             flagged = result.failures

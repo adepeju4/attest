@@ -11,7 +11,7 @@ from .checks.injection import check_injection
 from .checks.role import check_role_adherence
 from .checks.judge_baseline import JudgeVerdict, naive_judge
 from .checks.tool_use import check_tool_use
-from .checks.verify import extract_claims
+from .checks.verify import MAX_CLAIMS, extract_claims
 from .providers import DEFAULT_PROVIDER, build_client, default_model, list_models, providers
 from .results import CheckResult, Report
 from .scoring.report import DEFAULT_CHECKS, evaluate
@@ -42,6 +42,7 @@ class Attest:
         appropriate: bool = False,
         answer_kind: str = "factual",
         deep: bool = True,
+        max_claims: int = MAX_CLAIMS,
         extract: Callable[[str], list[str]] = extract_claims,
         verify=None,
     ) -> Report:
@@ -52,6 +53,7 @@ class Attest:
                 appropriate=appropriate,
                 answer_kind=answer_kind,
                 deep=deep,
+                max_claims=max_claims,
                 extract=extract,
                 verify=verify,
             )

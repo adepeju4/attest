@@ -2,7 +2,7 @@
 
 from .trajectory import Trajectory, Step, ToolCall
 from .results import Report, CheckResult, Finding, Severity, PROMPT_VERSION
-from .checks.verify import judge_trajectory, extract_claims, grounded_verifier
+from .checks.verify import judge_trajectory, extract_claims, grounded_verifier, verify_claims
 from .checks.judge_baseline import naive_judge, JudgeVerdict
 from .checks.tool_use import check_tool_use
 from .checks.injection import check_injection
@@ -18,7 +18,7 @@ __all__ = [
     "list_providers", "list_models", "default_model",
     "Trajectory", "Step", "ToolCall",
     "Report", "CheckResult", "Finding", "Severity", "PROMPT_VERSION",
-    "judge_trajectory", "extract_claims", "grounded_verifier",
+    "judge_trajectory", "extract_claims", "grounded_verifier", "verify_claims",
     "naive_judge", "JudgeVerdict",
     "check_tool_use", "check_injection", "check_role_adherence",
     "evaluate",
@@ -26,4 +26,4 @@ __all__ = [
     "wilson_interval", "difference_is_real", "Proportion",
 ]
 
-__version__ = "0.4.1"
+__version__ = "0.5.0"
