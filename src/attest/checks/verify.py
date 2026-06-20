@@ -35,9 +35,22 @@ ExtractFn = Callable[[str], list[str]]
 VerifyFn = Callable[[str, str], Finding]
 
 
+def _verify_safe(verify: VerifyFn, claim: str, evidence: str) -> Finding:
+    """One flaky claim shouldn't sink the whole check — degrade it to unverifiable."""
+    try:
+        return verify(claim, evidence)
+    except Exception as exc:
+        return Finding(
+            severity=Severity.WARN,
+            verdict="unverifiable",
+            subject=claim,
+            reason=f"Could not verify this claim ({type(exc).__name__}); excluded from the score.",
+        )
+
+
 def judge_trajectory(traj: Trajectory, extract: ExtractFn, verify: VerifyFn) -> CheckResult:
     evidence = traj.evidence()
-    findings = [verify(claim, evidence) for claim in extract(traj.final_answer)]
+    findings = [_verify_safe(verify, claim, evidence) for claim in extract(traj.final_answer)]
     supported = sum(f.verdict == "supported" for f in findings)
     unsupported = sum(f.verdict == "unsupported" for f in findings)
     checkable = supported + unsupported

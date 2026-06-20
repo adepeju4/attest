@@ -125,7 +125,7 @@ for a tiny, complete example.
 ## Develop
 
 ```bash
-uv run pytest        # 68 tests — they all run offline, no API key needed
+uv run pytest        # 69 tests — they all run offline, no API key needed
 ```
 
 ## Status

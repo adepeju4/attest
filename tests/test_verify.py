@@ -60,3 +60,19 @@ def test_unverifiable_excluded_from_rate():
     result = judge_trajectory(_example(), fake_extract, fake_verify)
     assert result.score == 1.0
     assert result.passed is True
+
+
+def test_one_flaky_claim_degrades_to_unverifiable():
+    fake_extract = lambda a: ["good claim", "boom claim"]
+
+    def fake_verify(claim, evidence):
+        if claim == "boom claim":
+            raise RuntimeError("provider returned nothing")
+        return Finding(severity=Severity.PASS, verdict="supported", subject=claim)
+
+    result = judge_trajectory(_example(), fake_extract, fake_verify)
+    assert result.score == 1.0  # the good claim still counts
+    assert result.passed is True
+    boom = [f for f in result.findings if f.subject == "boom claim"][0]
+    assert boom.verdict == "unverifiable"
+    assert boom.severity is Severity.WARN
