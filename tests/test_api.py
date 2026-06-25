@@ -77,6 +77,6 @@ def test_evaluate_routes_active_client(monkeypatch):
         seen["client"] = _resolve_client()
         return inj._AuthOut(unauthorized=False)
 
-    monkeypatch.setattr(inj, "call", spy)
+    monkeypatch.setattr(inj, "vote", spy)
     Attest(client=sentinel).injection(_traj(), deep=True)
     assert seen["client"] is sentinel

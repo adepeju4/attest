@@ -26,4 +26,4 @@ __all__ = [
     "wilson_interval", "difference_is_real", "Proportion",
 ]
 
-__version__ = "0.5.0"
+__version__ = "0.5.1"

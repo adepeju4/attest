@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import contextlib
+from collections import Counter
 from contextvars import ContextVar
 from functools import lru_cache
-from typing import Iterator, TypeVar
+from typing import Callable, Iterator, TypeVar
 
 import instructor
 from pydantic import BaseModel
@@ -73,7 +74,9 @@ def call(
     last_err: Exception | None = None
     for _ in range(max(1, attempts)):
         try:
-            return c.create(response_model=output, max_tokens=max_tokens, messages=messages)
+            return c.create(
+                response_model=output, max_tokens=max_tokens, temperature=0, messages=messages
+            )
         except Exception as e:
             if not _is_empty_response(e):
                 raise
@@ -83,6 +86,27 @@ def call(
         "thinking model exhausting its output-token budget, or a safety/recitation block. "
         "Try a larger max_tokens or a different model."
     ) from last_err
+
+
+def vote(
+    *,
+    system: str,
+    user: str,
+    output: type[T],
+    key: Callable[[T], object],
+    samples: int = 3,
+    client: instructor.Instructor | None = None,
+) -> T:
+    """Self-consistency: sample the judge `samples` times and return the result whose `key(...)`
+    value is the majority. Dampens LLM-judge non-determinism (e.g. Gemini is not truly greedy
+    even at temperature 0). With a deterministic model this is just the same verdict, repeated.
+    """
+    results = [
+        call(system=system, user=user, output=output, client=client)
+        for _ in range(max(1, samples))
+    ]
+    winner = Counter(key(r) for r in results).most_common(1)[0][0]
+    return next(r for r in results if key(r) == winner)
 
 
 def _is_empty_response(err: Exception) -> bool:
